@@ -1,3 +1,13 @@
+WeatherForecastService/
 WeatherForecastService/.vs/
 WeatherForecastService/WeatherForecastService/bin/
 WeatherForecastService/WeatherForecastService/obj
+Metrics/.vs/
+Metrics/MetricsAgent/bin/
+Metrics/MetricsAgent/obj
+Metrics/MetricsAgentTests/bin/
+Metrics/MetricsAgentTests/obj
+Metrics/MetricsManager/bin/
+Metrics/MetricsManager/obj
+Metrics/MetricsManagerTests/bin/
+Metrics/MetricsManagerTests/obj

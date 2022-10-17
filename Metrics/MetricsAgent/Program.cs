@@ -1,4 +1,6 @@
 using AutoMapper;
+using FluentMigrator.Runner;
+using MetricsAgent.Job;
 using MetricsAgent.Mappings;
 using MetricsAgent.Services;
 using MetricsAgent.Services.Impl;
@@ -6,6 +8,9 @@ using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
 using NLog.Web;
+using Quartz.Impl;
+using Quartz.Spi;
+using Quartz;
 using System.Data.SQLite;
 
 namespace MetricsAgent
@@ -67,7 +72,47 @@ namespace MetricsAgent
 
             #endregion
 
-            ConfigureSqlLiteConnection();
+            #region Configure Database
+
+            //ConfigureSqlLiteConnection(builder);
+
+            builder.Services.AddFluentMigratorCore()
+                .ConfigureRunner(rb =>
+                rb.AddSQLite()
+                .WithGlobalConnectionString(builder.Configuration["Settings:DatabaseOptions:ConnectionString"].ToString())
+                .ScanIn(typeof(Program).Assembly).For.Migrations()
+                ).AddLogging(lb => lb.AddFluentMigratorConsole());
+
+
+            #endregion
+
+            #region Configure Jobs
+
+            // Регистрация сервиса фабрики
+            builder.Services.AddSingleton<IJobFactory, SingletonJobFactory>();
+            // Регистрация базового сервиса Quartz
+            builder.Services.AddSingleton<ISchedulerFactory, StdSchedulerFactory>();
+            // Регистрация сервиса самой задачи
+            builder.Services.AddSingleton<CpuMetricJob>();
+
+            // https://www.freeformatter.com/cron-expression-generator-quartz.html
+            builder.Services.AddSingleton(new JobSchedule(typeof(CpuMetricJob), "0/5 * * ? * * *"));
+
+            builder.Services.AddSingleton<RamMetricJob>();
+            builder.Services.AddSingleton(new JobSchedule(typeof(RamMetricJob), "0/5 * * ? * * *"));
+
+            builder.Services.AddSingleton<HddMetricJob>();
+            builder.Services.AddSingleton(new JobSchedule(typeof(HddMetricJob), "0/5 * * ? * * *"));
+
+            builder.Services.AddSingleton<DotnetMetricJob>();
+            builder.Services.AddSingleton(new JobSchedule(typeof(DotnetMetricJob), "0/5 * * ? * * *"));
+
+            builder.Services.AddSingleton<NetworkMetricJob>();
+            builder.Services.AddSingleton(new JobSchedule(typeof(NetworkMetricJob), "0/5 * * ? * * *"));
+
+            builder.Services.AddHostedService<QuartzHostedService>();
+
+            #endregion
 
             builder.Services.AddControllers();
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -98,67 +143,15 @@ namespace MetricsAgent
 
             app.MapControllers();
 
-            app.Run();
-        }
-        private static void ConfigureSqlLiteConnection()
-        {
-            const string connectionString = "Data Source = metrics.db; Version = 3; Pooling = true; Max Pool Size = 100;";
-            var connection = new SQLiteConnection(connectionString);
-            connection.Open();
-            PrepareSchema(connection);
-        }
-
-        private static void PrepareSchema(SQLiteConnection connection)
-        {
-            using (var command = new SQLiteCommand(connection))
+            var serviceScopeFactory = app.Services.GetRequiredService<IServiceScopeFactory>();
+            using (IServiceScope serviceScope = serviceScopeFactory.CreateScope())
             {
-                //Задаём новый текст команды для выполнения
-                // Удаляем таблицу с метриками, если она есть в базе данных
-                command.CommandText = "DROP TABLE IF EXISTS cpumetrics";
-                // Отправляем запрос в базу данных
-                command.ExecuteNonQuery();
-                command.CommandText =
-                    @"CREATE TABLE cpumetrics(id INTEGER
-                    PRIMARY KEY,
-                    value INT, time INT)";
-                command.ExecuteNonQuery();
+                var migrationRunner = serviceScope.ServiceProvider.GetRequiredService<IMigrationRunner>();
+                migrationRunner.MigrateUp();
 
-                command.CommandText = "DROP TABLE IF EXISTS dotnetmetrics";
-                // Отправляем запрос в базу данных
-                command.ExecuteNonQuery();
-                command.CommandText =
-                    @"CREATE TABLE dotnetmetrics(id INTEGER
-                    PRIMARY KEY,
-                    value INT, time INT)";
-                command.ExecuteNonQuery();
-
-                command.CommandText = "DROP TABLE IF EXISTS hddmetrics";
-                // Отправляем запрос в базу данных
-                command.ExecuteNonQuery();
-                command.CommandText =
-                    @"CREATE TABLE hddmetrics(id INTEGER
-                    PRIMARY KEY,
-                    value INT, time INT)";
-                command.ExecuteNonQuery();
-
-                command.CommandText = "DROP TABLE IF EXISTS networkmetrics";
-                // Отправляем запрос в базу данных
-                command.ExecuteNonQuery();
-                command.CommandText =
-                    @"CREATE TABLE networkmetrics(id INTEGER
-                    PRIMARY KEY,
-                    value INT, time INT)";
-                command.ExecuteNonQuery();
-
-                command.CommandText = "DROP TABLE IF EXISTS rammetrics";
-                // Отправляем запрос в базу данных
-                command.ExecuteNonQuery();
-                command.CommandText =
-                    @"CREATE TABLE rammetrics(id INTEGER
-                    PRIMARY KEY,
-                    value INT, time INT)";
-                command.ExecuteNonQuery();
             }
+
+            app.Run();
         }
     }
 }
